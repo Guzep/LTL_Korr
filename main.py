@@ -15,12 +15,27 @@ class TelnetClient:
     def connect(self, host, port):
         try:
             self.tn = telnetlib.Telnet(host, port, timeout=5)
-            # Читаем приветственное сообщение
-            welcome = self.tn.read_until(b'>', timeout=5).decode('ascii').strip()
+            # Читаем приветственное сообщение полностью
+            welcome = self.read_full_welcome()
             self.connected = True
             return welcome
         except Exception as e:
             return str(e)
+
+    def read_full_welcome(self):
+        """Чтение всего приветственного сообщения до промпта '>'"""
+        full_message = ""
+        while True:
+            try:
+                part = self.tn.read_until(b'\n', timeout=0.5).decode('ascii')
+                if not part:
+                    break
+                full_message += part
+                if full_message.endswith('>'):
+                    break
+            except (EOFError, ConnectionResetError):
+                break
+        return full_message.strip()
 
     def disconnect(self):
         if self.connected:
@@ -46,13 +61,15 @@ class TelnetClient:
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Управление Мини Корр")
-        self.root.geometry("800x700")
+        self.root.title("Управление антенной")
+        self.root.geometry("800x750")  # Увеличили высоту для частоты опроса
 
         self.telnet = TelnetClient()
         self.logging = False
         self.log_file = None
-        self.fan_mode = "auto"  # auto/manual
+        self.monitoring_active = False
+        self.monitoring_thread = None
+        self.polling_interval = 10  # seconds
 
         # Создаем панели
         main_panel = tk.PanedWindow(root, orient=tk.VERTICAL, sashrelief=tk.RAISED, sashwidth=4)
@@ -160,13 +177,13 @@ class App:
         ttk.Button(
             mode_frame,
             text="Автоматический режим",
-            command=self.enable_auto_fan
+            command=lambda: self.send_command("4")
         ).pack(side=tk.LEFT, padx=5, pady=5)
 
         ttk.Button(
             mode_frame,
             text="Ручной режим",
-            command=self.enable_manual_fan
+            command=lambda: self.send_command("5")
         ).pack(side=tk.LEFT, padx=5, pady=5)
 
         control_frame = ttk.Frame(fan_frame)
@@ -214,16 +231,21 @@ class App:
         self.threshold_label = ttk.Label(threshold_frame, text="Текущие пороги: ---")
         self.threshold_label.pack(padx=5, pady=5)
 
-        # Управление логом
-        log_frame = ttk.LabelFrame(tab, text="Управление записью лога")
-        log_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Мониторинг температуры
+        monitor_frame = ttk.LabelFrame(tab, text="Мониторинг температуры")
+        monitor_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        self.log_button = ttk.Button(
-            log_frame,
-            text="Начать запись лога",
-            command=self.toggle_logging
+        ttk.Label(monitor_frame, text="Интервал опроса (сек):").pack(side=tk.LEFT, padx=5, pady=5)
+        self.interval_entry = ttk.Entry(monitor_frame, width=5)
+        self.interval_entry.pack(side=tk.LEFT, padx=5, pady=5)
+        self.interval_entry.insert(0, "10")
+
+        self.monitor_button = ttk.Button(
+            monitor_frame,
+            text="Начать мониторинг",
+            command=self.toggle_monitoring
         )
-        self.log_button.pack(padx=5, pady=5)
+        self.monitor_button.pack(side=tk.LEFT, padx=5, pady=5)
 
     def connect_device(self):
         """Подключение к устройству"""
@@ -263,15 +285,7 @@ class App:
         elif command == "9":  # Пороги температуры
             self.threshold_label.config(text=f"Текущие пороги: {response}")
 
-    def enable_auto_fan(self):
-        """Включение автоматического режима вентилятора"""
-        self.fan_mode = "auto"
-        self.send_command("4")
-
-    def enable_manual_fan(self):
-        """Включение ручного режима вентилятора"""
-        self.fan_mode = "manual"
-        self.send_command("5")
+        return response
 
     def set_thresholds(self):
         """Установка порогов температуры"""
@@ -285,37 +299,80 @@ class App:
         command = f"8 {min_val} {max_val}"
         self.send_command(command)
 
-    def toggle_logging(self):
-        """Переключение режима записи лога"""
-        if not self.logging:
-            # Начать запись
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{timestamp}_logfile.txt"
+    def toggle_monitoring(self):
+        """Переключение режима мониторинга температуры"""
+        if not self.monitoring_active:
+            # Начать мониторинг
             try:
-                self.log_file = open(filename, 'a')
+                self.polling_interval = int(self.interval_entry.get())
+                if self.polling_interval <= 0:
+                    raise ValueError("Интервал должен быть положительным числом")
+            except ValueError as e:
+                self.log(f"Ошибка: {str(e)}")
+                return
+
+            # Создаем файл лога
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.log_filename = f"{timestamp}_temperature_log.txt"
+            try:
+                self.log_file = open(self.log_filename, 'a')
                 self.logging = True
-                self.log(f"Начата запись лога в {filename}")
-                self.log_button.config(text="Остановить запись лога")
+                self.log(f"Начата запись температуры в {self.log_filename}")
             except Exception as e:
                 self.log(f"Ошибка создания файла лога: {str(e)}")
+                return
+
+            # Запускаем поток мониторинга
+            self.monitoring_active = True
+            self.monitoring_thread = threading.Thread(target=self.monitor_temperature)
+            self.monitoring_thread.daemon = True
+            self.monitoring_thread.start()
+
+            self.monitor_button.config(text="Остановить мониторинг")
         else:
-            # Остановить запись
-            try:
-                if self.log_file:
+            # Остановить мониторинг
+            self.monitoring_active = False
+            if self.logging and self.log_file:
+                try:
                     self.log_file.close()
-            except Exception as e:
-                self.log(f"Ошибка закрытия файла лога: {str(e)}")
-            self.logging = False
-            self.log("Запись лога остановлена")
-            self.log_button.config(text="Начать запись лога")
+                except Exception as e:
+                    self.log(f"Ошибка закрытия файла лога: {str(e)}")
+                self.logging = False
+                self.log("Мониторинг температуры остановлен")
+
+            self.monitor_button.config(text="Начать мониторинг")
+
+    def monitor_temperature(self):
+        """Периодический опрос температуры"""
+        while self.monitoring_active:
+            start_time = time.time()
+
+            # Отправляем команду запроса температуры
+            response = self.send_command("3")
+
+            # Записываем в лог-файл
+            if self.logging and self.log_file:
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                try:
+                    self.log_file.write(f"{timestamp},{response}\n")
+                    self.log_file.flush()
+                except Exception as e:
+                    self.log(f"Ошибка записи температуры: {str(e)}")
+
+            # Ожидаем до следующего опроса
+            elapsed = time.time() - start_time
+            sleep_time = max(0.1, self.polling_interval - elapsed)
+            time.sleep(sleep_time)
 
     def on_closing(self):
         """Обработка закрытия приложения"""
-        if self.logging and self.log_file:
-            try:
-                self.log_file.close()
-            except:
-                pass
+        if self.monitoring_active:
+            self.monitoring_active = False
+            if self.logging and self.log_file:
+                try:
+                    self.log_file.close()
+                except:
+                    pass
 
         if self.telnet.connected:
             self.telnet.disconnect()
