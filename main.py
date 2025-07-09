@@ -62,7 +62,7 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title("Управление антенной")
-        self.root.geometry("800x750")  # Увеличили высоту для частоты опроса
+        self.root.geometry("800x700")
 
         self.telnet = TelnetClient()
         self.logging = False
@@ -70,6 +70,7 @@ class App:
         self.monitoring_active = False
         self.monitoring_thread = None
         self.polling_interval = 10  # seconds
+        self.fan_mode = "auto"  # auto/manual
 
         # Создаем панели
         main_panel = tk.PanedWindow(root, orient=tk.VERTICAL, sashrelief=tk.RAISED, sashwidth=4)
@@ -154,98 +155,107 @@ class App:
             command=lambda: self.send_command("2")
         ).pack(side=tk.LEFT, padx=5, pady=5)
 
-        # Температура
+        # Температура и мониторинг
         temp_frame = ttk.LabelFrame(tab, text="Температура")
         temp_frame.pack(fill=tk.X, padx=5, pady=5)
 
+        # Первая строка: кнопка показа температуры и метка
+        temp_row1 = ttk.Frame(temp_frame)
+        temp_row1.pack(fill=tk.X, padx=5, pady=2)
+
         ttk.Button(
-            temp_frame,
+            temp_row1,
             text="Показать температуру",
             command=lambda: self.send_command("3")
-        ).pack(side=tk.LEFT, padx=5, pady=5)
+        ).pack(side=tk.LEFT, padx=5, pady=2)
 
-        self.temp_label = ttk.Label(temp_frame, text="---")
-        self.temp_label.pack(side=tk.LEFT, padx=5, pady=5)
+        self.temp_label = ttk.Label(temp_row1, text="---")
+        self.temp_label.pack(side=tk.LEFT, padx=5, pady=2)
 
-        # Управление вентилятором
-        fan_frame = ttk.LabelFrame(tab, text="Управление вентилятором")
-        fan_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Вторая строка: мониторинг температуры
+        temp_row2 = ttk.Frame(temp_frame)
+        temp_row2.pack(fill=tk.X, padx=5, pady=2)
 
-        mode_frame = ttk.Frame(fan_frame)
-        mode_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        ttk.Button(
-            mode_frame,
-            text="Автоматический режим",
-            command=lambda: self.send_command("4")
-        ).pack(side=tk.LEFT, padx=5, pady=5)
-
-        ttk.Button(
-            mode_frame,
-            text="Ручной режим",
-            command=lambda: self.send_command("5")
-        ).pack(side=tk.LEFT, padx=5, pady=5)
-
-        control_frame = ttk.Frame(fan_frame)
-        control_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        ttk.Button(
-            control_frame,
-            text="Включить вентилятор",
-            command=lambda: self.send_command("6")
-        ).pack(side=tk.LEFT, padx=5, pady=5)
-
-        ttk.Button(
-            control_frame,
-            text="Выключить вентилятор",
-            command=lambda: self.send_command("7")
-        ).pack(side=tk.LEFT, padx=5, pady=5)
-
-        # Пороги температуры
-        threshold_frame = ttk.LabelFrame(tab, text="Пороги температуры")
-        threshold_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        input_frame = ttk.Frame(threshold_frame)
-        input_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        ttk.Label(input_frame, text="Min:").pack(side=tk.LEFT, padx=5, pady=5)
-        self.min_entry = ttk.Entry(input_frame, width=5)
-        self.min_entry.pack(side=tk.LEFT, padx=5, pady=5)
-
-        ttk.Label(input_frame, text="Max:").pack(side=tk.LEFT, padx=5, pady=5)
-        self.max_entry = ttk.Entry(input_frame, width=5)
-        self.max_entry.pack(side=tk.LEFT, padx=5, pady=5)
-
-        ttk.Button(
-            input_frame,
-            text="Установить пороги",
-            command=self.set_thresholds
-        ).pack(side=tk.LEFT, padx=5, pady=5)
-
-        ttk.Button(
-            input_frame,
-            text="Получить пороги",
-            command=lambda: self.send_command("9")
-        ).pack(side=tk.LEFT, padx=5, pady=5)
-
-        self.threshold_label = ttk.Label(threshold_frame, text="Текущие пороги: ---")
-        self.threshold_label.pack(padx=5, pady=5)
-
-        # Мониторинг температуры
-        monitor_frame = ttk.LabelFrame(tab, text="Мониторинг температуры")
-        monitor_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        ttk.Label(monitor_frame, text="Интервал опроса (сек):").pack(side=tk.LEFT, padx=5, pady=5)
-        self.interval_entry = ttk.Entry(monitor_frame, width=5)
-        self.interval_entry.pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Label(temp_row2, text="Интервал мониторинга (сек):").pack(side=tk.LEFT, padx=5, pady=2)
+        self.interval_entry = ttk.Entry(temp_row2, width=5)
+        self.interval_entry.pack(side=tk.LEFT, padx=5, pady=2)
         self.interval_entry.insert(0, "10")
 
         self.monitor_button = ttk.Button(
-            monitor_frame,
+            temp_row2,
             text="Начать мониторинг",
             command=self.toggle_monitoring
         )
-        self.monitor_button.pack(side=tk.LEFT, padx=5, pady=5)
+        self.monitor_button.pack(side=tk.LEFT, padx=5, pady=2)
+
+        # Управление вентилятором - строка 1: Автоматический режим и пороги
+        fan_frame1 = ttk.LabelFrame(tab, text="Управление вентилятором (автоматический режим)")
+        fan_frame1.pack(fill=tk.X, padx=5, pady=5)
+
+        # Автоматический режим
+        auto_frame = ttk.Frame(fan_frame1)
+        auto_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        ttk.Button(
+            auto_frame,
+            text="Включить автоматический режим",
+            command=self.enable_auto_fan
+        ).pack(side=tk.LEFT, padx=5, pady=2)
+
+        # Пороги температуры
+        threshold_frame = ttk.Frame(fan_frame1)
+        threshold_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        ttk.Label(threshold_frame, text="Min:").pack(side=tk.LEFT, padx=5, pady=2)
+        self.min_entry = ttk.Entry(threshold_frame, width=5)
+        self.min_entry.pack(side=tk.LEFT, padx=5, pady=2)
+
+        ttk.Label(threshold_frame, text="Max:").pack(side=tk.LEFT, padx=5, pady=2)
+        self.max_entry = ttk.Entry(threshold_frame, width=5)
+        self.max_entry.pack(side=tk.LEFT, padx=5, pady=2)
+
+        ttk.Button(
+            threshold_frame,
+            text="Установить пороги",
+            command=self.set_thresholds
+        ).pack(side=tk.LEFT, padx=5, pady=2)
+
+        self.threshold_label = ttk.Label(threshold_frame, text="Текущие пороги: ---")
+        self.threshold_label.pack(side=tk.LEFT, padx=5, pady=2)
+
+        # Управление вентилятором - строка 2: Ручной режим
+        fan_frame2 = ttk.LabelFrame(tab, text="Управление вентилятором (ручной режим)")
+        fan_frame2.pack(fill=tk.X, padx=5, pady=5)
+
+        # Ручной режим
+        manual_frame = ttk.Frame(fan_frame2)
+        manual_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        ttk.Button(
+            manual_frame,
+            text="Включить ручной режим",
+            command=self.enable_manual_fan
+        ).pack(side=tk.LEFT, padx=5, pady=2)
+
+        # Управление вентилятором в ручном режиме
+        control_frame = ttk.Frame(fan_frame2)
+        control_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        self.fan_on_button = ttk.Button(
+            control_frame,
+            text="Включить вентилятор",
+            command=lambda: self.send_command("6"),
+            state=tk.DISABLED
+        )
+        self.fan_on_button.pack(side=tk.LEFT, padx=5, pady=2)
+
+        self.fan_off_button = ttk.Button(
+            control_frame,
+            text="Выключить вентилятор",
+            command=lambda: self.send_command("7"),
+            state=tk.DISABLED
+        )
+        self.fan_off_button.pack(side=tk.LEFT, padx=5, pady=2)
 
     def connect_device(self):
         """Подключение к устройству"""
@@ -287,6 +297,24 @@ class App:
 
         return response
 
+    def enable_auto_fan(self):
+        """Включение автоматического режима вентилятора"""
+        self.fan_mode = "auto"
+        self.send_command("4")
+        # Деактивируем кнопки ручного управления
+        self.fan_on_button.config(state=tk.DISABLED)
+        self.fan_off_button.config(state=tk.DISABLED)
+        self.log("Включен автоматический режим вентилятора")
+
+    def enable_manual_fan(self):
+        """Включение ручного режима вентилятора"""
+        self.fan_mode = "manual"
+        self.send_command("5")
+        # Активируем кнопки ручного управления
+        self.fan_on_button.config(state=tk.NORMAL)
+        self.fan_off_button.config(state=tk.NORMAL)
+        self.log("Включен ручной режим вентилятора")
+
     def set_thresholds(self):
         """Установка порогов температуры"""
         min_val = self.min_entry.get()
@@ -298,6 +326,15 @@ class App:
 
         command = f"8 {min_val} {max_val}"
         self.send_command(command)
+
+        # Автоматически обновляем отображение порогов
+        self.update_thresholds()
+
+    def update_thresholds(self):
+        """Обновление отображения текущих порогов"""
+        if self.telnet.connected:
+            response = self.send_command("9")
+            self.threshold_label.config(text=f"Текущие пороги: {response}")
 
     def toggle_monitoring(self):
         """Переключение режима мониторинга температуры"""
