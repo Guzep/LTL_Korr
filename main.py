@@ -126,12 +126,12 @@ class App:
         ttk.Label(conn_frame, text="IP адрес:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
         self.ip_entry = ttk.Entry(conn_frame, width=15)
         self.ip_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.ip_entry.insert(0, "192.168.0.100")
+        self.ip_entry.insert(0, "192.168.1.100")
 
         ttk.Label(conn_frame, text="Порт:").grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
         self.port_entry = ttk.Entry(conn_frame, width=8)
         self.port_entry.grid(row=0, column=3, padx=5, pady=5)
-        self.port_entry.insert(0, "5100")
+        self.port_entry.insert(0, "23")
 
         ttk.Button(
             conn_frame,
@@ -140,18 +140,18 @@ class App:
         ).grid(row=0, column=4, padx=5, pady=5)
 
         # Управление реле
-        relay_frame = ttk.LabelFrame(tab, text="Управление реле")
+        relay_frame = ttk.LabelFrame(tab, text="Управление сигналом")
         relay_frame.pack(fill=tk.X, padx=5, pady=5)
 
         ttk.Button(
             relay_frame,
-            text="Включить реле",
+            text="Включить сигнал",
             command=lambda: self.send_command("1")
         ).pack(side=tk.LEFT, padx=5, pady=5)
 
         ttk.Button(
             relay_frame,
-            text="Выключить реле",
+            text="Выключить сигнал",
             command=lambda: self.send_command("2")
         ).pack(side=tk.LEFT, padx=5, pady=5)
 
@@ -206,11 +206,11 @@ class App:
         threshold_frame = ttk.Frame(fan_frame1)
         threshold_frame.pack(fill=tk.X, padx=5, pady=2)
 
-        ttk.Label(threshold_frame, text="Min:").pack(side=tk.LEFT, padx=5, pady=2)
+        ttk.Label(threshold_frame, text="Low:").pack(side=tk.LEFT, padx=5, pady=2)
         self.min_entry = ttk.Entry(threshold_frame, width=5)
         self.min_entry.pack(side=tk.LEFT, padx=5, pady=2)
 
-        ttk.Label(threshold_frame, text="Max:").pack(side=tk.LEFT, padx=5, pady=2)
+        ttk.Label(threshold_frame, text="High:").pack(side=tk.LEFT, padx=5, pady=2)
         self.max_entry = ttk.Entry(threshold_frame, width=5)
         self.max_entry.pack(side=tk.LEFT, padx=5, pady=2)
 
@@ -257,6 +257,28 @@ class App:
         )
         self.fan_off_button.pack(side=tk.LEFT, padx=5, pady=2)
 
+        "Настройки IP и Gateway и МК"
+        # Настройки подключения
+        conn_frame = ttk.LabelFrame(tab, text="Настройки IP и Gateway на МК")
+        conn_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(conn_frame, text="IP адрес:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        self.ip_entry_1 = ttk.Entry(conn_frame, width=15)
+        self.ip_entry_1.grid(row=0, column=1, padx=5, pady=5)
+        self.ip_entry_1.insert(0, "192.168.1.100")
+
+        ttk.Label(conn_frame, text="Шлюз:").grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
+        self.port_entry_1 = ttk.Entry(conn_frame, width=8)
+        self.port_entry_1.grid(row=0, column=3, padx=5, pady=5)
+        self.port_entry_1.insert(0, "0.0.0.0")
+
+
+
+        ttk.Button(
+            conn_frame,
+            text="Отправить",
+            command=self.send_command_10
+        ).grid(row=0, column=4, padx=5, pady=5)
     def connect_device(self):
         """Подключение к устройству"""
         ip = self.ip_entry.get()
@@ -279,6 +301,23 @@ class App:
         else:
             self.log(f"Ошибка подключения: {result}")
 
+    def send_command_10(self):
+        """Отправка команды на устройство"""
+        ip = self.ip_entry_1.get()
+        port = self.port_entry_1.get()
+
+        if not self.telnet.connected:
+            self.log("Не подключено к устройству")
+            return
+
+        command = '10 '+ip+' '+port
+
+        self.log(f"Отправка команды: {command}")
+        response = self.telnet.send_command(command)
+        self.log(f"Ответ: {response}")
+
+        return response
+
     def send_command(self, command):
         """Отправка команды на устройство"""
         if not self.telnet.connected:
@@ -294,6 +333,9 @@ class App:
             self.temp_label.config(text=response)
         elif command == "9":  # Пороги температуры
             self.threshold_label.config(text=f"Текущие пороги: {response}")
+        elif command == "10":  # Смена IP и шлюза
+            self.threshold_label.config(text=f"Текущие пороги: {response}")
+
 
         return response
 
@@ -321,7 +363,7 @@ class App:
         max_val = self.max_entry.get()
 
         if not min_val or not max_val:
-            self.log("Ошибка: Введите значения min и max")
+            self.log("Ошибка: Введите значения low и high")
             return
 
         command = f"8 {min_val} {max_val}"
@@ -334,6 +376,7 @@ class App:
         """Обновление отображения текущих порогов"""
         if self.telnet.connected:
             response = self.send_command("9")
+            response = response[17:]
             self.threshold_label.config(text=f"Текущие пороги: {response}")
 
     def toggle_monitoring(self):
@@ -342,8 +385,8 @@ class App:
             # Начать мониторинг
             try:
                 self.polling_interval = int(self.interval_entry.get())
-                if self.polling_interval <= 0:
-                    raise ValueError("Интервал должен быть положительным числом")
+                if self.polling_interval <= 5 and self.polling_interval < 20:
+                    raise ValueError("Интервал должен быть больше 5 и меньше 20")
             except ValueError as e:
                 self.log(f"Ошибка: {str(e)}")
                 return
