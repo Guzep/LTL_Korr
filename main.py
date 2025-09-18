@@ -20,6 +20,7 @@ class TelnetClient:
             self.connected = True
             return welcome
         except Exception as e:
+            self.connected = False
             return str(e)
 
     def read_full_welcome(self):
@@ -55,13 +56,14 @@ class TelnetClient:
                     response = response[:-1].strip()
                 return response
             except Exception as e:
+                self.connected = False
                 return f"Ошибка: {str(e)}"
 
 
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Управление антенной")
+        self.root.title("Little Correlation GUI")
         self.root.geometry("800x700")
 
         self.telnet = TelnetClient()
@@ -69,6 +71,8 @@ class App:
         self.log_file = None
         self.monitoring_active = False
         self.monitoring_thread = None
+        self.keepalive_active = False
+        self.keepalive_thread = None
         self.polling_interval = 10  # seconds
         self.fan_mode = "auto"  # auto/manual
 
@@ -272,13 +276,64 @@ class App:
         self.port_entry_1.grid(row=0, column=3, padx=5, pady=5)
         self.port_entry_1.insert(0, "0.0.0.0")
 
-
-
         ttk.Button(
             conn_frame,
             text="Отправить",
             command=self.send_command_10
         ).grid(row=0, column=4, padx=5, pady=5)
+
+    def update_connection_status(self):
+        """Обновление состояния кнопок в зависимости от подключения"""
+        connected = self.telnet.connected
+
+        # Обновляем состояние кнопок ручного управления
+        if connected and self.fan_mode == "manual":
+            self.fan_on_button.config(state=tk.NORMAL)
+            self.fan_off_button.config(state=tk.NORMAL)
+        else:
+            self.fan_on_button.config(state=tk.DISABLED)
+            self.fan_off_button.config(state=tk.DISABLED)
+
+        # Можно добавить обновление других элементов интерфейса здесь
+
+    def start_keepalive(self):
+        """Запуск периодической отправки команды 11 для поддержания соединения"""
+        if self.keepalive_active:
+            return
+
+        self.keepalive_active = True
+        self.keepalive_thread = threading.Thread(target=self.keepalive_loop)
+        self.keepalive_thread.daemon = True
+        self.keepalive_thread.start()
+
+    def stop_keepalive(self):
+        """Остановка периодической отправки команды 11"""
+        self.keepalive_active = False
+        if self.keepalive_thread and self.keepalive_thread.is_alive():
+            self.keepalive_thread.join(timeout=1.0)
+
+    def keepalive_loop(self):
+        """Цикл периодической отправки команды 11"""
+        while self.keepalive_active and self.telnet.connected:
+            try:
+                # Отправляем команду 11 для поддержания соединения
+                response = self.send_command("11")
+
+                # Если команда не удалась, считаем соединение разорванным
+                if "Ошибка" in response or "Не подключено" in response:
+                    self.telnet.connected = False
+                    self.log("Соединение прервано")
+                    self.update_connection_status()
+                    break
+
+                # Ждем 28 секунд до следующей отправки
+                time.sleep(28)
+            except Exception as e:
+                self.telnet.connected = False
+                self.log(f"Ошибка в keepalive: {str(e)}")
+                self.update_connection_status()
+                break
+
     def connect_device(self):
         """Подключение к устройству"""
         ip = self.ip_entry.get()
@@ -298,8 +353,13 @@ class App:
         if self.telnet.connected:
             self.log(f"Успешно подключено к {ip}:{port}")
             self.log(f"Сообщение сервера:\n{result}")
+            # Запускаем keepalive
+            self.start_keepalive()
+            # Обновляем состояние интерфейса
+            self.update_connection_status()
         else:
             self.log(f"Ошибка подключения: {result}")
+            self.update_connection_status()
 
     def send_command_10(self):
         """Отправка команды на устройство"""
@@ -310,7 +370,7 @@ class App:
             self.log("Не подключено к устройству")
             return
 
-        command = '10 '+ip+' '+port
+        command = '10 ' + ip + ' ' + port
 
         self.log(f"Отправка команды: {command}")
         response = self.telnet.send_command(command)
@@ -322,11 +382,16 @@ class App:
         """Отправка команды на устройство"""
         if not self.telnet.connected:
             self.log("Не подключено к устройству")
-            return
+            self.update_connection_status()
+            return "Не подключено"
 
         self.log(f"Отправка команды: {command}")
         response = self.telnet.send_command(command)
         self.log(f"Ответ: {response}")
+
+        # Проверяем, не разорвано ли соединение
+        if "Ошибка" in response or not self.telnet.connected:
+            self.update_connection_status()
 
         # Обработка ответов для обновления интерфейса
         if command == "3":  # Температура
@@ -335,7 +400,6 @@ class App:
             self.threshold_label.config(text=f"Текущие пороги: {response}")
         elif command == "10":  # Смена IP и шлюза
             self.threshold_label.config(text=f"Текущие пороги: {response}")
-
 
         return response
 
@@ -352,9 +416,10 @@ class App:
         """Включение ручного режима вентилятора"""
         self.fan_mode = "manual"
         self.send_command("5")
-        # Активируем кнопки ручного управления
-        self.fan_on_button.config(state=tk.NORMAL)
-        self.fan_off_button.config(state=tk.NORMAL)
+        # Активируем кнопки ручного управления только если есть соединение
+        if self.telnet.connected:
+            self.fan_on_button.config(state=tk.NORMAL)
+            self.fan_off_button.config(state=tk.NORMAL)
         self.log("Включен ручной режим вентилятора")
 
     def set_thresholds(self):
@@ -453,6 +518,9 @@ class App:
                     self.log_file.close()
                 except:
                     pass
+
+        # Останавливаем keepalive
+        self.stop_keepalive()
 
         if self.telnet.connected:
             self.telnet.disconnect()
