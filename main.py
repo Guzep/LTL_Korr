@@ -143,6 +143,27 @@ class App:
             command=self.connect_device
         ).grid(row=0, column=4, padx=5, pady=5)
 
+        "Настройки IP и Gateway и МК"
+        # Настройки подключения
+        conn_frame = ttk.LabelFrame(tab, text="Настройки IP и Gateway на МК")
+        conn_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(conn_frame, text="IP адрес:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        self.ip_entry_1 = ttk.Entry(conn_frame, width=15)
+        self.ip_entry_1.grid(row=0, column=1, padx=5, pady=5)
+        self.ip_entry_1.insert(0, "192.168.1.100")
+
+        ttk.Label(conn_frame, text="Шлюз:").grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
+        self.port_entry_1 = ttk.Entry(conn_frame, width=8)
+        self.port_entry_1.grid(row=0, column=3, padx=5, pady=5)
+        self.port_entry_1.insert(0, "0.0.0.0")
+
+        ttk.Button(
+            conn_frame,
+            text="Отправить",
+            command=self.send_command_10
+        ).grid(row=0, column=4, padx=5, pady=5)
+
         # Управление реле
         relay_frame = ttk.LabelFrame(tab, text="Управление сигналом")
         relay_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -224,6 +245,12 @@ class App:
             command=self.set_thresholds
         ).pack(side=tk.LEFT, padx=5, pady=2)
 
+        ttk.Button(
+            threshold_frame,
+            text="Получить пороги",
+            command=self.get_thresholds
+        ).pack(side=tk.LEFT, padx=5, pady=2)
+
         self.threshold_label = ttk.Label(threshold_frame, text="Текущие пороги: ---")
         self.threshold_label.pack(side=tk.LEFT, padx=5, pady=2)
 
@@ -261,26 +288,7 @@ class App:
         )
         self.fan_off_button.pack(side=tk.LEFT, padx=5, pady=2)
 
-        "Настройки IP и Gateway и МК"
-        # Настройки подключения
-        conn_frame = ttk.LabelFrame(tab, text="Настройки IP и Gateway на МК")
-        conn_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        ttk.Label(conn_frame, text="IP адрес:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
-        self.ip_entry_1 = ttk.Entry(conn_frame, width=15)
-        self.ip_entry_1.grid(row=0, column=1, padx=5, pady=5)
-        self.ip_entry_1.insert(0, "192.168.1.100")
-
-        ttk.Label(conn_frame, text="Шлюз:").grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
-        self.port_entry_1 = ttk.Entry(conn_frame, width=8)
-        self.port_entry_1.grid(row=0, column=3, padx=5, pady=5)
-        self.port_entry_1.insert(0, "0.0.0.0")
-
-        ttk.Button(
-            conn_frame,
-            text="Отправить",
-            command=self.send_command_10
-        ).grid(row=0, column=4, padx=5, pady=5)
 
     def update_connection_status(self):
         """Обновление состояния кнопок в зависимости от подключения"""
@@ -421,6 +429,12 @@ class App:
             self.fan_on_button.config(state=tk.NORMAL)
             self.fan_off_button.config(state=tk.NORMAL)
         self.log("Включен ручной режим вентилятора")
+
+    def get_thresholds(self):
+        """Установка порогов температуры"""
+        self.send_command("7")
+        # Автоматически обновляем отображение порогов
+        self.update_thresholds()
 
     def set_thresholds(self):
         """Установка порогов температуры"""
