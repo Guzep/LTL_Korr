@@ -432,7 +432,7 @@ class App:
 
     def get_thresholds(self):
         """Установка порогов температуры"""
-        self.send_command("7")
+        self.send_command("9")
         # Автоматически обновляем отображение порогов
         self.update_thresholds()
 
